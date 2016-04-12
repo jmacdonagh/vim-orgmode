@@ -582,10 +582,14 @@ Handling links~
                         link. File name completion is enabled to link to a
                         local file. In addition vim-orgmode provides the
                         command :OrgHyperlinkInsert to insert a link from
-                        command line.
+                        command line. If possible, the link will be made
+                        relative to the current file's directory.
 
   gil                   When the cursor is on an existing link, gil allows you
                         to edit the link and description parts of the link.
+
+  giL                   Insert a link like gil, but do not try to make links
+                        relative.
 
   Not yet implemented in vim-orgmode~
   C-c C-o or mouse-1 or mouse-2  Open link at point.

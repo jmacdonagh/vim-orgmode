@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import os.path
 import re
 
 import vim
@@ -68,6 +69,75 @@ class Hyperlinks(object):
 			return res
 
 	@classmethod
+	def _insert(cls, uri=None, description=None, absolute=False):
+		u""" Inserts a hyperlink. If no arguments are provided, an interactive
+		query will be started.
+
+		:uri: The URI that will be opened
+		:description: An optional description that will be displayed instead of
+				the URI
+		:absolute: If True, do not try to make URI relative to the current
+			    file's path
+
+		:returns: (URI, description)
+		"""
+		link = Hyperlinks._get_link()
+		if link:
+			if uri is None and link[u'uri'] is not None:
+				uri = link[u'uri']
+			if description is None and link[u'description'] is not None:
+				description = link[u'description']
+
+		if uri is None:
+			uri = vim.eval(u'input("Link: ", "", "file")')
+		elif link:
+			uri = vim.eval(u'input("Link: ", "%s", "file")' % link[u'uri'])
+		if uri is None:
+			return
+		else:
+			uri = uri.decode(u'utf-8')
+
+		if not absolute:
+			uri_base = vim.eval(u'expand("%:p:h")')
+			if uri_base:
+				# don't want to collapse symbolic links
+				uri_components = uri.split('#')
+				norm_uri = os.path.normpath(uri_components[0])
+				if norm_uri.startswith(os.path.join(uri_base, '')):
+					uri_components[0] = os.path.relpath(norm_uri, uri_base)
+					uri = '#'.join(uri_components)
+
+		# character escaping
+		uri = uri.replace(u'\\', u'\\\\\\\\')
+		uri = uri.replace(u' ', u'\ ')
+
+		if description is None:
+			description = vim.eval(u'input("Description: ")').decode(u'utf-8')
+		elif link:
+			description = vim.eval(
+				u'input("Description: ", "%s")' %
+				link[u'description']).decode(u'utf-8')
+		if description is None:
+			return
+
+		cursor = vim.current.window.cursor
+		cl = vim.current.buffer[cursor[0] - 1].decode(u'utf-8')
+		head = cl[:cursor[1] + 1] if not link else cl[:link[u'start']]
+		tail = cl[cursor[1] + 1:] if not link else cl[link[u'end']:]
+
+		separator = u''
+		if description:
+			separator = u']['
+
+		if uri or description:
+			vim.current.buffer[cursor[0] - 1] = \
+				(u''.join((head, u'[[%s%s%s]]' %
+					(uri, separator, description), tail))).encode(u'utf-8')
+		elif link:
+			vim.current.buffer[cursor[0] - 1] = \
+				(u''.join((head, tail))).encode(u'utf-8')
+
+	@classmethod
 	def follow(cls, action=u'openLink', visual=u''):
 		u""" Follow hyperlink. If called on a regular string UTL determines the
 		outcome. Normally a file with that name will be opened.
@@ -102,8 +172,7 @@ class Hyperlinks(object):
 	@classmethod
 	@realign_tags
 	def insert(cls, uri=None, description=None):
-		u""" Inserts a hyperlink. If no arguments are provided, an interactive
-		query will be started.
+		u""" Inserts a hyperlink and try to make it relative, if possible.
 
 		:uri: The URI that will be opened
 		:description: An optional description that will be displayed instead of
@@ -111,51 +180,20 @@ class Hyperlinks(object):
 
 		:returns: (URI, description)
 		"""
-		link = Hyperlinks._get_link()
-		if link:
-			if uri is None and link[u'uri'] is not None:
-				uri = link[u'uri']
-			if description is None and link[u'description'] is not None:
-				description = link[u'description']
+		return Hyperlinks._insert(uri, description, absolute=False)
 
-		if uri is None:
-			uri = vim.eval(u'input("Link: ", "", "file")')
-		elif link:
-			uri = vim.eval(u'input("Link: ", "%s", "file")' % link[u'uri'])
-		if uri is None:
-			return
-		else:
-			uri = uri.decode(u'utf-8')
+	@classmethod
+	@realign_tags
+	def insert_absolute(cls, uri=None, description=None):
+		u""" Inserts a hyperlink without trying to make it relative.
 
-		# character escaping
-		uri = uri.replace(u'\\', u'\\\\\\\\')
-		uri = uri.replace(u' ', u'\ ')
+		:uri: The URI that will be opened
+		:description: An optional description that will be displayed instead of
+				the URI
 
-		if description is None:
-			description = vim.eval(u'input("Description: ")').decode(u'utf-8')
-		elif link:
-			description = vim.eval(
-				u'input("Description: ", "%s")' %
-				link[u'description']).decode(u'utf-8')
-		if description is None:
-			return
-
-		cursor = vim.current.window.cursor
-		cl = vim.current.buffer[cursor[0] - 1].decode(u'utf-8')
-		head = cl[:cursor[1] + 1] if not link else cl[:link[u'start']]
-		tail = cl[cursor[1] + 1:] if not link else cl[link[u'end']:]
-
-		separator = u''
-		if description:
-			separator = u']['
-
-		if uri or description:
-			vim.current.buffer[cursor[0] - 1] = \
-				(u''.join((head, u'[[%s%s%s]]' %
-					(uri, separator, description), tail))).encode(u'utf-8')
-		elif link:
-			vim.current.buffer[cursor[0] - 1] = \
-				(u''.join((head, tail))).encode(u'utf-8')
+		:returns: (URI, description)
+		"""
+		return Hyperlinks._insert(uri, description, absolute=True)
 
 	def register(self):
 		u"""
@@ -185,6 +223,15 @@ class Hyperlinks(object):
 		self.keybindings.append(
 			Keybinding(u'gil', Plug(u'OrgHyperlinkInsert', self.commands[-1])))
 		self.menu + ActionEntry(u'&Insert Link', self.keybindings[-1])
+
+		cmd = Command(
+			u'OrgHyperlinkInsertAbsolute',
+			u':py ORGMODE.plugins[u"Hyperlinks"].insert_absolute(<f-args>)',
+			arguments=u'*')
+		self.commands.append(cmd)
+		self.keybindings.append(
+			Keybinding(u'giL', Plug(u'OrgHyperlinkInsertAbsolute', self.commands[-1])))
+		self.menu + ActionEntry(u'Insert &Absolute Link', self.keybindings[-1])
 
 		self.menu + Separator()
 
